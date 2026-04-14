@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
+import plotly.io as pio
 from utils import generate_plotly_code, generate_all_insights, chat_with_data
 from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
@@ -14,27 +15,28 @@ st.title("🤖 AI Data Analyst Dashboard")
 # -------------------------------
 uploaded_file = st.file_uploader("Upload CSV/Excel", type=["csv", "xlsx"])
 
-df = None
-
 if uploaded_file:
     if uploaded_file.name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
     else:
         df = pd.read_excel(uploaded_file)
 
+    st.session_state["df"] = df
+
     st.success("✅ File Uploaded")
     st.dataframe(df.head())
-
 
 # -------------------------------
 # GENERATE CHARTS
 # -------------------------------
 if st.button("🚀 Generate Charts"):
 
-    if df is None:
+    if "df" not in st.session_state:
         st.error("Upload dataset first")
 
     else:
+        df = st.session_state["df"]
+
         with st.spinner("Generating charts..."):
 
             code = generate_plotly_code(df)
@@ -42,61 +44,70 @@ if st.button("🚀 Generate Charts"):
             st.subheader("⚡ Generated Code")
             st.code(code)
 
-            # Remove .show()
             clean_code = code.replace(".show()", "")
 
             local_vars = {"df": df}
             exec(clean_code, {}, local_vars)
 
-            st.subheader("📊 Visualizations")
-
             figs = []
 
             for var in local_vars:
                 if "fig" in var.lower():
-                    fig = local_vars[var]
-                    st.plotly_chart(fig, use_container_width=True)
-                    figs.append(fig)
+                    figs.append(local_vars[var])
 
-            # Save charts in session
             st.session_state["figs"] = figs
             st.session_state["code"] = code
 
             # 🔥 ONE CALL INSIGHTS
-            st.subheader("📊 Insights")
             insights = generate_all_insights(df, code)
-            st.success(insights)
-
             st.session_state["insights"] = insights
 
 
 # -------------------------------
-# SAVE DASHBOARD
+# DISPLAY (PERSISTENT)
+# -------------------------------
+if "figs" in st.session_state:
+
+    st.subheader("📊 Visualizations")
+
+    for fig in st.session_state["figs"]:
+        st.plotly_chart(fig, use_container_width=True)
+
+if "insights" in st.session_state:
+
+    st.subheader("📊 Insights")
+    st.success(st.session_state["insights"])
+
+
+# -------------------------------
+# SAVE DASHBOARD (FIXED)
 # -------------------------------
 if st.button("💾 Save Dashboard"):
 
     if "figs" in st.session_state:
-        data = [fig.to_dict() for fig in st.session_state["figs"]]
+
+        charts_json = [pio.to_json(fig) for fig in st.session_state["figs"]]
 
         with open("dashboard.json", "w") as f:
-            json.dump(data, f)
+            json.dump(charts_json, f)
 
         st.success("✅ Dashboard Saved!")
 
 
 # -------------------------------
-# LOAD DASHBOARD (WORKING)
+# LOAD DASHBOARD (FIXED)
 # -------------------------------
 if st.button("📂 Load Dashboard"):
 
     try:
         with open("dashboard.json", "r") as f:
-            charts = json.load(f)
+            charts_json = json.load(f)
 
-        st.subheader("📊 Loaded Dashboard")
+        figs = [pio.from_json(c) for c in charts_json]
 
-        for chart in charts:
-            st.plotly_chart(chart, use_container_width=True)
+        st.session_state["figs"] = figs
+
+        st.success("✅ Dashboard Loaded!")
 
     except:
         st.error("❌ No saved dashboard found")
@@ -124,13 +135,13 @@ if st.button("📄 Export Insights as PDF"):
 # -------------------------------
 st.subheader("💬 Chat with Dataset")
 
-query = st.text_input("Ask anything about your data")
+query = st.text_input("Ask something about your data")
 
 if st.button("Ask"):
 
-    if df is None:
+    if "df" not in st.session_state:
         st.error("Upload dataset first")
 
     elif query:
-        answer = chat_with_data(df, query)
+        answer = chat_with_data(st.session_state["df"], query)
         st.success(answer)
